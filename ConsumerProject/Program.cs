@@ -8,22 +8,37 @@ namespace ConsumerProject
 {
     public class Consumer
     {
-        private string saveFolderPath;
+        private string rootFolderPath;
         private int maxQueueLength;
         private int port;
 
-        public Consumer(string saveFolderPath, int maxQueueLength, int port)
+        public Consumer(string rootFolderPath, int maxQueueLength, int port)
         {
-            this.saveFolderPath = saveFolderPath;
+            this.rootFolderPath = rootFolderPath;
             this.maxQueueLength = maxQueueLength;
             this.port = port;
         }
 
         public void Start()
         {
-            TcpListener listener = new TcpListener(IPAddress.Any, port);
-            listener.Start();
-            Console.WriteLine("Consumer is listening for video uploads...");
+            TcpListener listener = null;
+            bool listenerStarted = false;
+
+            while (!listenerStarted)
+            {
+                try
+                {
+                    listener = new TcpListener(IPAddress.Any, port);
+                    listener.Start();
+                    listenerStarted = true;
+                    Console.WriteLine("Consumer is listening for video uploads...");
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+                {
+                    Console.WriteLine($"Port {port} is already in use. Please enter a different port number:");
+                    port = int.Parse(Console.ReadLine());
+                }
+            }
 
             while (true)
             {
@@ -43,20 +58,42 @@ namespace ConsumerProject
                     byte[] buffer = new byte[1024];
                     int bytesRead;
 
+                    // Read the header (threadId|fileName)
+                    int headerLength = 0;
+                    while ((bytesRead = stream.Read(buffer, headerLength, 1)) > 0)
+                    {
+                        if (buffer[headerLength] == 0) // Delimiter found
+                        {
+                            break;
+                        }
+                        headerLength++;
+                    }
+
+                    string header = System.Text.Encoding.UTF8.GetString(buffer, 0, headerLength);
+                    string[] headerParts = header.Split('|');
+                    int threadId = int.Parse(headerParts[0]);
+                    string fileName = headerParts[1];
+
+                    // Create or use existing folder for the thread
+                    string threadFolderPath = Path.Combine(rootFolderPath, $"thread{threadId}");
+                    Directory.CreateDirectory(threadFolderPath);
+
+                    string filePath = Path.Combine(threadFolderPath, fileName);
+
+                    // Read the file content
                     while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
                     {
                         ms.Write(buffer, 0, bytesRead);
                     }
 
                     byte[] videoData = ms.ToArray();
-                    string fileName = Path.Combine(saveFolderPath, $"video_{DateTime.Now.Ticks}.mp4");
 
                     // Simulate a leaky bucket (bounded queue)
-                    if (Directory.GetFiles(saveFolderPath).Length < maxQueueLength)
+                    if (Directory.GetFiles(threadFolderPath).Length < maxQueueLength)
                     {
-                        File.WriteAllBytes(fileName, videoData);
-                        Console.WriteLine($"Saved video to {fileName}.");
-                        DisplayVideo(fileName);
+                        File.WriteAllBytes(filePath, videoData);
+                        Console.WriteLine($"Saved video to {filePath}.");
+                        DisplayVideo(filePath);
                     }
                     else
                     {
@@ -99,18 +136,18 @@ namespace ConsumerProject
             Console.WriteLine("Use default path (\"{0}\")? Y/n", AppDomain.CurrentDomain.BaseDirectory);
             string useDefaultPath = Console.ReadLine();
 
-            string saveFolderPath;
+            string rootFolderPath;
             if (useDefaultPath.Equals("Y", StringComparison.OrdinalIgnoreCase))
             {
-                saveFolderPath = AppDomain.CurrentDomain.BaseDirectory;
+                rootFolderPath = AppDomain.CurrentDomain.BaseDirectory;
             }
             else
             {
                 Console.WriteLine("Enter the folder path where videos will be saved:");
-                saveFolderPath = Console.ReadLine();
+                rootFolderPath = Console.ReadLine();
             }
 
-            Consumer consumer = new Consumer(saveFolderPath, maxQueueLength, port);
+            Consumer consumer = new Consumer(rootFolderPath, maxQueueLength, port);
             consumer.Start();
 
             Console.WriteLine("Consumer started. Press any key to exit...");
