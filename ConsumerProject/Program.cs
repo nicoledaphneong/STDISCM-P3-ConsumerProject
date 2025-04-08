@@ -79,6 +79,7 @@ namespace ConsumerProject
                     Directory.CreateDirectory(threadFolderPath);
 
                     string filePath = Path.Combine(threadFolderPath, fileName);
+                    filePath = GetUniqueFilePath(filePath);
 
                     // Read the file content
                     while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
@@ -109,6 +110,22 @@ namespace ConsumerProject
             {
                 client.Close();
             }
+        }
+
+        private string GetUniqueFilePath(string filePath)
+        {
+            string directory = Path.GetDirectoryName(filePath);
+            string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath);
+            string extension = Path.GetExtension(filePath);
+            int count = 1;
+
+            while (File.Exists(filePath))
+            {
+                filePath = Path.Combine(directory, $"{fileNameWithoutExtension} ({count}){extension}");
+                count++;
+            }
+
+            return filePath;
         }
 
         private void DisplayVideo(string videoFilePath)
